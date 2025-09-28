@@ -1,7 +1,7 @@
 {
   "name": "deezmod-adblock",
   "version": "1.0.0",
-  "description": "AdBlock plugin for DeezMod using Ghostery's adblocker",
+  "description": "AdBlock plugin for DeezMod using pattern matching",
   "main": "adblock.js",
   "scripts": {
     "build": "node build.mjs --minify",
@@ -11,11 +11,7 @@
     "prebuild": "npm run clean",
     "postbuild": "echo Build complete! Output: bundled_adblock.js"
   },
-  "dependencies": {
-    "@ghostery/adblocker-electron": "^2.11.6",
-    "@ghostery/adblocker-electron-preload": "^2.11.6",
-    "cross-fetch": "^4.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "esbuild": "^0.19.0"
   },
