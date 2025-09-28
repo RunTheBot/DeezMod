@@ -36,6 +36,88 @@ module.exports = {
             ]);
         }
 
+        // Setup blocking function for sessions using webRequest API
+        function setupBlockingForSession(blocker, targetSession) {
+            try {
+                const { webRequest } = targetSession;
+                
+                // Set up specific pattern blocking first (like your example)
+                const adBlockPatterns = [
+                    '*://*.doubleclick.net/*',
+                    '*://*.googleadservices.com/*',
+                    '*://*.googlesyndication.com/*',
+                    '*://*.google-analytics.com/*',
+                    '*://*.googletagmanager.com/*',
+                    '*://*.facebook.com/tr/*',
+                    '*://*.facebook.net/*',
+                    '*://connect.facebook.net/*',
+                    '*://*.amazon-adsystem.com/*',
+                    '*://googleads.g.doubleclick.net/*',
+                    '*://pagead2.googlesyndication.com/*'
+                ];
+
+                // Block known ad domains first
+                webRequest.onBeforeRequest({ urls: adBlockPatterns }, (details, callback) => {
+                    log(`🚫 Pattern blocked: ${details.url}`);
+                    callback({ cancel: true });
+                });
+                
+                // Use Ghostery for all requests - simpler approach
+                webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+                    try {
+                        const { url, resourceType } = details;
+                        
+                        // Check simple string patterns first for common ad domains
+                        const urlLower = url.toLowerCase();
+                        if (urlLower.includes('doubleclick.net') || 
+                            urlLower.includes('googleadservices.com') ||
+                            urlLower.includes('googlesyndication.com') ||
+                            urlLower.includes('google-analytics.com') ||
+                            urlLower.includes('googletagmanager.com') ||
+                            urlLower.includes('facebook.com/tr') ||
+                            urlLower.includes('connect.facebook.net') ||
+                            urlLower.includes('amazon-adsystem.com')) {
+                            log(`🚫 Pattern blocked: ${url}`);
+                            callback({ cancel: true });
+                            return;
+                        }
+                        
+                        // Use Ghostery for everything else
+                        const request = {
+                            url,
+                            type: resourceType || 'other',
+                            sourceUrl: details.referrer || '',
+                        };
+                        
+                        if (blocker && typeof blocker.match === 'function') {
+                            const result = blocker.match(request);
+                            if (result && result.match === true) {
+                                log(`🚫 Ghostery blocked: ${url}`);
+                                callback({ cancel: true });
+                                return;
+                            } else if (result && result.redirect) {
+                                log(`↪️ Redirected: ${url} -> ${result.redirect}`);
+                                callback({ redirectURL: result.redirect });
+                                return;
+                            }
+                            // Log first few requests to verify matching is working
+                            if (Math.random() < 0.001) { // 0.1% sample rate
+                                debug(`✓ Checked: ${url} (allowed)`);
+                            }
+                        }
+                        callback({});
+                    } catch (err) {
+                        debug(`Error in blocking logic: ${err.message}`);
+                        callback({});
+                    }
+                });
+                
+                log('Blocking enabled for session with pattern + Ghostery filtering');
+            } catch (err) {
+                error('Failed to setup blocking for session:', err.message);
+            }
+        }
+
         async function initializeGhosteryAdBlocker() {
             log('Initializing Ghostery AdBlocker...');
             
@@ -71,39 +153,79 @@ module.exports = {
                     throw new Error('Blocker instance is null or undefined');
                 }
 
-                // Enable blocking on default session
+                // Enable blocking on default session - use manual method since Ghostery's built-in isn't working
                 log('Enabling ad blocking on default session...');
-                blocker.enableBlockingInSession(session.defaultSession);
+                setupBlockingForSession(blocker, session.defaultSession);
+                
+                // Also set up blocking for any existing webContents
+                const { webContents } = require('electron');
+                const allWebContents = webContents.getAllWebContents();
+                log(`Setting up blocking for ${allWebContents.length} existing webContents...`);
+                
+                allWebContents.forEach((wc, index) => {
+                    try {
+                        if (wc.session) {
+                            debug(`Setting up blocking for existing webContents ${index + 1}`);
+                            // Use manual setup since Ghostery's built-in isn't working properly
+                            setupBlockingForSession(blocker, wc.session);
+                        }
+                    } catch (err) {
+                        debug(`Failed to setup blocking for existing webContents ${index + 1}:`, err.message);
+                    }
+                });
                 
                 // Enable blocking on new sessions
                 app.on('session-created', (newSession) => {
                     debug('New session created, enabling ad blocking...');
-                    try {
-                        blocker.enableBlockingInSession(newSession);
-                        debug('Ad blocking enabled for new session');
-                    } catch (err) {
-                        error('Failed to enable blocking for new session:', err.message);
-                    }
+                    setupBlockingForSession(blocker, newSession);
                 });
 
                 // Enable blocking on new webContents
                 app.on('web-contents-created', (event, webContents) => {
                     debug('New webContents created, ensuring ad blocking...');
-                    try {
-                        if (webContents.session) {
-                            blocker.enableBlockingInSession(webContents.session);
-                            debug('Ad blocking ensured for webContents session');
-                        }
-                    } catch (err) {
-                        error('Failed to enable blocking for webContents:', err.message);
+                    if (webContents.session) {
+                        setupBlockingForSession(blocker, webContents.session);
                     }
                 });
 
                 // Log stats if available
-                if (blocker.engine && blocker.engine.size) {
-                    log(`Loaded ${blocker.engine.size} blocking rules`);
-                } else if (blocker.lists) {
+                let statsLogged = false;
+                
+                if (blocker.engine) {
+                    if (blocker.engine.size) {
+                        log(`Loaded ${blocker.engine.size} blocking rules from engine`);
+                        statsLogged = true;
+                    }
+                    if (blocker.engine.filters) {
+                        log(`Engine contains ${blocker.engine.filters.length} filters`);
+                        statsLogged = true;
+                    }
+                }
+                
+                if (blocker.lists && Object.keys(blocker.lists).length > 0) {
                     log(`Loaded ${Object.keys(blocker.lists).length} filter lists`);
+                    statsLogged = true;
+                }
+                
+                if (blocker.getFilters) {
+                    try {
+                        const filters = blocker.getFilters();
+                        if (filters.networkFilters) {
+                            log(`Network filters: ${filters.networkFilters.length}`);
+                            statsLogged = true;
+                        }
+                        if (filters.cosmeticFilters) {
+                            log(`Cosmetic filters: ${filters.cosmeticFilters.length}`);
+                            statsLogged = true;
+                        }
+                    } catch (e) {
+                        debug('Error getting filter stats:', e.message);
+                    }
+                }
+                
+                if (!statsLogged) {
+                    log('Blocker loaded but no filter statistics available');
+                    debug('Blocker object keys:', Object.keys(blocker));
                 }
 
                 log('✓ Ghostery AdBlocker successfully initialized!');
