@@ -1,0 +1,23 @@
+{
+  "name": "deezmod-adblock",
+  "version": "1.0.0",
+  "description": "AdBlock plugin for DeezMod using Ghostery's adblocker",
+  "main": "adblock.js",
+  "scripts": {
+    "build": "esbuild src/adblock.js --bundle --outfile=bundled_adblock.js --platform=node --minify --target=node16 --external:electron --external:@ghostery/adblocker-electron-preload",
+    "build:dev": "esbuild src/adblock.js --bundle --outfile=bundled_adblock.js --platform=node --target=node16 --sourcemap --external:electron --external:@ghostery/adblocker-electron-preload",
+    "build:watch": "esbuild src/adblock.js --bundle --outfile=bundled_adblock.js --platform=node --target=node16 --sourcemap --watch --external:electron --external:@ghostery/adblocker-electron-preload",
+    "clean": "del bundled_adblock.js bundled_adblock.js.map 2>nul || echo Clean complete",
+    "prebuild": "npm run clean",
+    "postbuild": "echo Build complete! Output: bundled_adblock.js"
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.11.6",
+    "cross-fetch": "^4.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.0"
+  },
+  "author": "DeezMod",
+  "license": "MIT"
+}
